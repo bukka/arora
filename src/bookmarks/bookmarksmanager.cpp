@@ -65,6 +65,7 @@
 #include "autosaver.h"
 #include "bookmarknode.h"
 #include "bookmarksmodel.h"
+#include "bookmarksimporter.h"
 #include "browserapplication.h"
 #include "history.h"
 #include "xbelreader.h"
@@ -281,12 +282,22 @@ void BookmarksManager::importBookmarks()
     QStringList supportedFormats;
     supportedFormats << tr("XBEL bookmarks").append(QLatin1String("(*.xbel *.xml)"));
     supportedFormats << tr("HTML Netscape bookmarks").append(QLatin1String("(*.html)"));
+    supportedFormats << tr("Opera ADR").append(QLatin1String("(*.adr)"));
 
     QString fileName = QFileDialog::getOpenFileName(0, tr("Open File"),
                                                     QString(), supportedFormats.join(QLatin1String(";;")));
     if (fileName.isEmpty())
         return;
 
+    BookmarksImporter importer(fileName);
+    if (importer.error()) {
+        QMessageBox::warning(0, tr("Loading Bookmark"), importer.errorString());
+        return;
+    }
+    BookmarkNode *importRootNode = importer.rootNode();
+
+
+    /*
     XbelReader reader;
     BookmarkNode *importRootNode = 0;
     if (fileName.endsWith(QLatin1String(".html"))) {
@@ -308,7 +319,8 @@ void BookmarksManager::importBookmarks()
             return;
         }
         importRootNode = reader.read(&process);
-    } else {
+    }
+    else {
         importRootNode = reader.read(fileName);
     }
     if (reader.error() != QXmlStreamReader::NoError) {
@@ -318,6 +330,7 @@ void BookmarksManager::importBookmarks()
         delete importRootNode;
         return;
     }
+    */
 
     importRootNode->setType(BookmarkNode::Folder);
     importRootNode->title = (tr("Imported %1").arg(QDate::currentDate().toString(Qt::SystemLocaleShortDate)));
