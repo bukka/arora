@@ -17,8 +17,102 @@
  * Boston, MA  02110-1301  USA
  */
 
+#include <qfile.h>
+#include <qchar.h>
+
 #include "bookmarksimporter.h"
+#include "bookmarknode.h"
+#include "xbelreader.h"
+
+
+BookmarkHTMLToken::BookmarkHTMLToken(QIODevice *device)
+{
+
+}
+
+QString BookmarkHTMLToken::attr(const QString &key)
+{
+    if (m_attributes.contains(key))
+        return m_attributes[key];
+    else
+        return QString();
+}
+
+QString BookmarkHTMLToken::readIdent()
+{
+    skipBlanks();
+    QByteArray otherChars = "-_";
+    QString str;
+
+    while (QChar(m_char).isLetterOrNumber() || otherChars.contains(m_char)) {
+        str.append(m_char);
+        if (!m_device->getChar(m_char)) {
+            m_error = true;
+            return QString();
+        }
+    }
+    return str;
+}
+
+QString BookmarkHTMLToken::readContent(char endChar)
+{
+    QString str;
+    while (m_char != endChar) {
+        str.append(m_char);
+        if (!m_device->getChar(m_char)) {
+            m_error = true;
+            return QString();
+        }
+    }
+    return str;
+}
+
+void BookmarkHTMLToken::skipBlanks()
+{
+    if (!QChar(m_char).isSpace())
+        return;
+    while (m_device->getChar(m_char) && QChar(m_char).isSpace()) {}
+}
 
 BookmarksImporter::BookmarksImporter(const QString &path)
 {
+    root = new BookmarkNode(BookmarkNode::Root);
+    error = false;
+
+    QFile file(fileName);
+    if (!file.exists()) {
+        // error
+        return;
+    }
+    file.open(QFile::ReadOnly);
+
+    if (fileName.endsWith(QLatin1String(".html"))) {
+        parseHTML(file);
+    } else if (fileName.endsWith(QLatin1String(".adr"))) {
+        parseADR(file);
+    } else {
+        XbelReader reader;
+        importRootNode = reader.read(file);
+    }
+
+    if (reader.error() != QXmlStreamReader::NoError) {
+        m_error = true;
+        m_errorString = tr("Error when loading bookmarks on line %1, column %2:\n"
+                           "%3").arg(reader.lineNumber()).arg(reader.columnNumber()).arg(reader.errorString());
+        delete root;
+        root = 0;
+        return;
+    }
+
+    return root;
+}
+
+void BookmarksImporter::parseHTML(QIODevice *device)
+{
+
+}
+
+void BookmarksImporter::parseADR(QIODevice *device)
+{
+
 }

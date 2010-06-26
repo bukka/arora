@@ -68,7 +68,6 @@
 #include "bookmarksimporter.h"
 #include "browserapplication.h"
 #include "history.h"
-#include "xbelreader.h"
 #include "xbelwriter.h"
 
 #include <qbuffer.h>

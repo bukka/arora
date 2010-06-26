@@ -20,9 +20,44 @@
 #ifndef BOOKMARKSIMPORTER_H
 #define BOOKMARKSIMPORTER_H
 
-#include <qstring.h>
+#include <qmap.h>
 
-#include "bookmarknode.h"
+class QIODevice;
+class BookmarkNode;
+
+class BookmarkHTMLToken
+{
+public:
+    enum Type {
+        Meta,
+        Title,
+        Header,
+        ListStart,
+        ListEnd,
+        Folder,
+        Link,
+        Separator
+    };
+
+    BookmarkHTMLToken(QIODevice *device);
+
+    bool error() { return m_error; }
+    Type type() { return m_type;  }
+    QString content() { return m_content; }
+    QString attr(const QString &key);
+
+private:
+    QString readIdent();
+    QString readContent(char endChar);
+    void skipBlanks();
+
+    char m_char;
+    QIODevice *m_device;
+    bool m_error;
+    Type m_type;
+    QString m_content;
+    QMap m_attributes;
+};
 
 class BookmarksImporter
 {
@@ -35,6 +70,9 @@ public:
     BookmarkNode *rootNode() { return m_root; }
 
 private:
+    void parseHTML(QIODevice *device);
+    void parseADR(QIODevice *device);
+
     bool m_error;
     QString m_errorString;
     BookmarkNode *m_root;
