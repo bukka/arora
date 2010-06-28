@@ -21,6 +21,7 @@
 #define BOOKMARKSIMPORTER_H
 
 #include <qmap.h>
+#include <qobject.h>
 
 class QIODevice;
 class BookmarkNode;
@@ -29,45 +30,58 @@ class BookmarkHTMLToken
 {
 public:
     enum Type {
+        Empty,
         Meta,
         Title,
         Header,
-        ListStart,
+        ListBegin,
         ListEnd,
+        Paragraph,
         Folder,
         Link,
+        Description,
         Separator
     };
 
     BookmarkHTMLToken(QIODevice *device);
 
-    bool error() { return m_error; }
-    Type type() { return m_type;  }
-    QString content() { return m_content; }
-    QString attr(const QString &key);
+    bool error() const;
+    Type type() const;
+    QString content() const;
+    QString attr(const QString &key) const;
 
 private:
+    struct Tag
+    {
+        bool test(const char *str, bool isEnd = false) const;
+        QString name;
+        bool end;
+        bool comment;
+    };
+
+    Tag readTag(bool saveAttributes = true);
     QString readIdent();
-    QString readContent(char endChar);
-    void skipBlanks();
+    QString readContent(char endChar = '<');
+    bool readAttributes(bool save = true);
+    bool skipBlanks();
+    bool cmpNext(char ch);
 
     char m_char;
     QIODevice *m_device;
     bool m_error;
     Type m_type;
     QString m_content;
-    QMap m_attributes;
+    QMap<QString, QString> m_attributes;
 };
 
-class BookmarksImporter
+class BookmarksImporter : public QObject
 {
 public:
-    BookmarksImporter(const QString &path);
+    BookmarksImporter(const QString &fileName);
 
-    bool error() { return m_error; }
-    QString errorString() { return m_errorString; }
-
-    BookmarkNode *rootNode() { return m_root; }
+    bool error() const;
+    QString errorString() const;
+    BookmarkNode *rootNode() const;
 
 private:
     void parseHTML(QIODevice *device);
@@ -76,6 +90,7 @@ private:
     bool m_error;
     QString m_errorString;
     BookmarkNode *m_root;
+    BookmarkNode *m_parent;
 };
 
 #endif // BOOKMARKSIMPORTER_H
