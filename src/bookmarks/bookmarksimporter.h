@@ -34,25 +34,28 @@ public:
         Meta,
         Title,
         Header,
-        ListBegin,
+        ListStart,
         ListEnd,
         Paragraph,
         Folder,
-        Link,
+        Bookmark,
         Description,
         Separator
     };
 
     BookmarkHTMLToken(QIODevice *device);
 
+    bool readNext();
+    bool last() const;
     bool error() const;
     Type type() const;
     QString content() const;
     QString attr(const QString &key) const;
 
 private:
-    struct Tag
+    class Tag
     {
+    public:
         bool test(const char *str, bool isEnd = false) const;
         QString name;
         bool end;
@@ -67,10 +70,11 @@ private:
     bool cmpNext(char ch);
 
     char m_char;
-    QIODevice *m_device;
+    bool m_last;
     bool m_error;
     Type m_type;
     QString m_content;
+    QIODevice *m_device;
     QMap<QString, QString> m_attributes;
 };
 
@@ -84,13 +88,15 @@ public:
     BookmarkNode *rootNode() const;
 
 private:
-    void parseHTML(QIODevice *device);
-    void parseADR(QIODevice *device);
+    void parseHTML();
+    void parseHTMLFolder(BookmarkNode *parent);
+    void parseADR();
 
     bool m_error;
     QString m_errorString;
+    QIODevice *m_device;
     BookmarkNode *m_root;
-    BookmarkNode *m_parent;
+    BookmarkHTMLToken *m_HTMLToken;
 };
 
 #endif // BOOKMARKSIMPORTER_H

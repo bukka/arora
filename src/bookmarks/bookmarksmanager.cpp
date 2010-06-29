@@ -280,7 +280,7 @@ BookmarksModel *BookmarksManager::bookmarksModel()
 void BookmarksManager::importBookmarks()
 {
     QStringList supportedFormats;
-    supportedFormats << tr("XBEL bookmarks").append(QLatin1String("(*.xbel *.xml)"));
+    //supportedFormats << tr("XBEL bookmarks").append(QLatin1String("(*.xbel *.xml)"));
     supportedFormats << tr("HTML Netscape bookmarks").append(QLatin1String("(*.html)"));
     supportedFormats << tr("Opera ADR").append(QLatin1String("(*.adr)"));
 
@@ -291,7 +291,7 @@ void BookmarksManager::importBookmarks()
 
     BookmarksImporter importer(fileName);
     if (importer.error()) {
-        QMessageBox::warning(0, tr("Loading Bookmark"), importer.errorString());
+        //QMessageBox::warning(0, tr("Loading Bookmark"), importer.errorString());
         return;
     }
     BookmarkNode *importRootNode = importer.rootNode();

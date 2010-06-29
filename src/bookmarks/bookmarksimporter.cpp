@@ -24,18 +24,32 @@
 #include "bookmarknode.h"
 #include "xbelreader.h"
 
-// parse one commment
+// parse one html token
 BookmarkHTMLToken::BookmarkHTMLToken(QIODevice *device)
 {
     m_device = device;
-    m_type = Empty;
     m_error = false;
+
+    if (m_device->getChar(&m_char)) {
+        m_last = false;
+        readNext();
+    } else {
+        m_last = true;
+        m_type = Empty;
+    }
+}
+
+bool BookmarkHTMLToken::readNext()
+{
+    m_type = Empty;
+    if (m_last)
+        return true;
 
     Tag tag;
     do {
         tag = readTag();
-        if (m_error || tag.name.isEmpty())
-            return;
+        if (m_error)
+            return false;
     } while (tag.comment);
 
     if (tag.test("META")) {
@@ -58,7 +72,7 @@ BookmarkHTMLToken::BookmarkHTMLToken(QIODevice *device)
         if (tag.end)
             m_type = ListEnd;
         else
-            m_type = ListBegin;
+            m_type = ListStart;
     } else if (tag.test("P")) {
         m_type = Paragraph;
     } else if (tag.test("DT")) {
@@ -70,7 +84,7 @@ BookmarkHTMLToken::BookmarkHTMLToken(QIODevice *device)
             if (!tag.test("H3", true))
                 m_error = true;
         } else if (tag.test("A")) {
-            m_type = Link;
+            m_type = Bookmark;
             m_content = readContent();
             tag = readTag();
             if (!tag.test("A", true))
@@ -84,11 +98,20 @@ BookmarkHTMLToken::BookmarkHTMLToken(QIODevice *device)
     } else
         m_error = true;
 
+    if (m_error)
+        m_last = true;
+
+    return !m_last;
 }
 
 bool BookmarkHTMLToken::Tag::test(const char *str, bool isEnd) const
 {
     return name == QLatin1String(str) && isEnd == end;
+}
+
+bool BookmarkHTMLToken::last() const
+{
+    return m_last;
 }
 
 bool BookmarkHTMLToken::error() const
@@ -119,7 +142,7 @@ BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
     Tag tag;
     tag.end = tag.comment = false;
 
-    if (!m_device->getChar(&m_char) || !skipBlanks())
+    if (!skipBlanks())
         return tag;
 
     if (!cmpNext('<')) {
@@ -135,29 +158,29 @@ BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
                 return tag;
             }
         } while (m_char != '>');
-        return tag;
-    }
+    } else {
+        if (m_char == '/') {
+            tag.end = true;
+            if (!m_device->getChar(&m_char))
+                m_error = true;
+        }
 
-    if (m_char == '/') {
-        tag.end = true;
-        if (!m_device->getChar(&m_char)) {
-            m_error = true;
+        tag.name = readIdent();
+        if (m_error)
             return tag;
+
+        if (tag.end) {
+            skipBlanks();
+            if (m_char != '>')
+                m_error = true;
+        } else {
+            if (!readAttributes(saveAttributes))
+                m_error = true;
         }
     }
 
-    tag.name = readIdent();
-    if (m_error)
-        return tag;
-
-    if (tag.end) {
-        skipBlanks();
-        if (m_char != '>')
-            m_error = true;
-    } else {
-        if (!readAttributes(saveAttributes))
-            m_error = true;
-    }
+    if (!m_error)
+        m_last = (!m_device->getChar(&m_char) || !skipBlanks());
 
     return tag;
 }
@@ -183,15 +206,15 @@ QString BookmarkHTMLToken::readContent(char endChar)
 {
     QString str;
     do {
+        if (m_char == endChar)
+            break;
+        str.append(QChar::fromAscii(m_char));
+
         if (!m_device->getChar(&m_char)) {
             m_error = true;
             return QString();
         }
-        if (m_char != endChar)
-            break;
-        str.append(QChar::fromAscii(m_char));
     } while (true);
-    m_device->putChar(m_char);
 
     return str;
 }
@@ -205,7 +228,7 @@ bool BookmarkHTMLToken::readAttributes(bool save)
             return true;
 
         QString name = readIdent();
-        if (m_error || !skipBlanks() || !cmpNext('=') || !skipBlanks() || m_char != '"')
+        if (m_error || !skipBlanks() || !cmpNext('=') || !skipBlanks() || !cmpNext('"'))
             return false;
 
         QString value = readContent('"');
@@ -235,7 +258,7 @@ bool BookmarkHTMLToken::cmpNext(char ch)
 
 BookmarksImporter::BookmarksImporter(const QString &fileName)
 {
-    m_parent = m_root = new BookmarkNode(BookmarkNode::Root);
+    m_root = new BookmarkNode(BookmarkNode::Root);
     m_error = false;
 
     QFile file(fileName);
@@ -244,11 +267,12 @@ BookmarksImporter::BookmarksImporter(const QString &fileName)
         return;
     }
     file.open(QFile::ReadOnly);
+    m_device = &file;
 
     if (fileName.endsWith(QLatin1String(".html"))) {
-        parseHTML(&file);
+        parseHTML();
     } else if (fileName.endsWith(QLatin1String(".adr"))) {
-        parseADR(&file);
+        parseADR();
     } else {
         XbelReader reader;
         m_root = reader.read(&file);
@@ -277,12 +301,78 @@ BookmarkNode *BookmarksImporter::rootNode() const
     return m_root;
 }
 
-void BookmarksImporter::parseHTML(QIODevice *device)
+void BookmarksImporter::parseHTML()
 {
+    m_HTMLToken = new BookmarkHTMLToken(m_device);
+    if (m_HTMLToken->type() == BookmarkHTMLToken::Empty) {
+        if (m_HTMLToken->error())
+            m_error = true;
+        return;
+    }
+    m_error = false;
 
+    if (m_HTMLToken->type() == BookmarkHTMLToken::Meta)
+        m_HTMLToken->readNext();
+    if (m_HTMLToken->type() == BookmarkHTMLToken::Title)
+        m_HTMLToken->readNext();
+    if (m_HTMLToken->type() == BookmarkHTMLToken::Header)
+        m_HTMLToken->readNext();
+
+    if (m_HTMLToken->type() == BookmarkHTMLToken::ListStart)
+        parseHTMLFolder(m_root);
+    else if (m_HTMLToken->type() != BookmarkHTMLToken::Empty)
+        m_error = true;
+
+    delete m_HTMLToken;
 }
 
-void BookmarksImporter::parseADR(QIODevice *device)
+void BookmarksImporter::parseHTMLFolder(BookmarkNode *parent)
+{
+    m_HTMLToken->readNext();
+    if (m_HTMLToken->type() == BookmarkHTMLToken::Paragraph)
+        m_HTMLToken->readNext();
+
+    while (!m_HTMLToken->error() && m_HTMLToken->type() != BookmarkHTMLToken::ListEnd) {
+        if (m_HTMLToken->type() == BookmarkHTMLToken::Separator) {
+            new BookmarkNode(BookmarkNode::Separator, parent);
+            m_HTMLToken->readNext();
+        } else if (m_HTMLToken->type() == BookmarkHTMLToken::Bookmark) {
+            BookmarkNode *bookmark = new BookmarkNode(BookmarkNode::Bookmark, parent);
+            bookmark->title = m_HTMLToken->content();
+            if (bookmark->title.isEmpty())
+                bookmark->title = tr("Unknown title");
+            bookmark->url = m_HTMLToken->attr(QLatin1String("HREF"));
+            m_HTMLToken->readNext();
+            if (m_HTMLToken->type() == BookmarkHTMLToken::Description) {
+                bookmark->desc = m_HTMLToken->content();
+                m_HTMLToken->readNext();
+            }
+        } else if (m_HTMLToken->type() == BookmarkHTMLToken::Folder) {
+            BookmarkNode *folder = new BookmarkNode(BookmarkNode::Folder, parent);
+            folder->title = m_HTMLToken->content();
+
+            m_HTMLToken->readNext();
+            if (m_HTMLToken->type() == BookmarkHTMLToken::Description) {
+                folder->desc = m_HTMLToken->content();
+                m_HTMLToken->readNext();
+            }
+            if (m_HTMLToken->type() == BookmarkHTMLToken::ListStart) {
+                parseHTMLFolder(folder);
+                m_HTMLToken->readNext();
+                if (m_HTMLToken->type() == BookmarkHTMLToken::Paragraph)
+                    m_HTMLToken->readNext();
+            }
+        } else {
+            m_error = true;
+            break;
+        }
+    }
+
+    if (m_HTMLToken->error())
+        m_error = true;
+}
+
+void BookmarksImporter::parseADR()
 {
 
 }
