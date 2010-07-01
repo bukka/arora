@@ -24,8 +24,42 @@
 #include "bookmarknode.h"
 #include "xbelreader.h"
 
-// parse one html token
-BookmarkHTMLToken::BookmarkHTMLToken(QIODevice *device)
+
+// DEVICE
+
+BookmarksDevice::BookmarksDevice(QIODevice *device)
+{
+    m_device = device;
+    m_line = m_column = 1;
+}
+
+int BookmarksDevice::line() const
+{
+    return m_line;
+}
+
+int BookmarksDevice::column() const
+{
+    return m_column;
+}
+
+bool BookmarksDevice::getChar(char *ch)
+{
+    if (m_device->getChar(ch)) {
+        if (*ch == '\n') {
+            m_column = 1;
+            m_line++;
+        } else
+            m_column++;
+        return true;
+    } else
+        return false;
+}
+
+
+// TOKEN
+
+BookmarkHTMLToken::BookmarkHTMLToken(BookmarksDevice *device)
 {
     m_device = device;
     m_error = false;
@@ -106,7 +140,7 @@ bool BookmarkHTMLToken::readNext()
 
 bool BookmarkHTMLToken::Tag::test(const char *str, bool isEnd) const
 {
-    return name == QLatin1String(str) && isEnd == end;
+    return name == QLatin1String(str) && isEnd == end && !error;
 }
 
 bool BookmarkHTMLToken::last() const
@@ -140,7 +174,7 @@ QString BookmarkHTMLToken::attr(const QString &key) const
 BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
 {
     Tag tag;
-    tag.end = tag.comment = false;
+    tag.error = tag.end = tag.comment = false;
 
     if (!skipBlanks())
         return tag;
@@ -181,6 +215,8 @@ BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
 
     if (!m_error)
         m_last = (!m_device->getChar(&m_char) || !skipBlanks());
+    else
+        tag.error = true;
 
     return tag;
 }
@@ -228,13 +264,21 @@ bool BookmarkHTMLToken::readAttributes(bool save)
             return true;
 
         QString name = readIdent();
-        if (m_error || !skipBlanks() || !cmpNext('=') || !skipBlanks() || !cmpNext('"'))
+        if (m_error || !skipBlanks())
             return false;
 
-        QString value = readContent('"');
-        if (m_error || !m_device->getChar(&m_char))
-            return false;
-
+        QString value;
+        if (m_char == '=') {
+            if (!m_device->getChar(&m_char) || !skipBlanks() || !cmpNext('"'))
+                return false;
+            
+            value = readContent('"');
+            if (m_error || !m_device->getChar(&m_char))
+                return false;
+        }
+        else
+            value = QLatin1String("yes");
+        
         if (save)
             m_attributes[name.toUpper()] = value;
     }
@@ -256,18 +300,20 @@ bool BookmarkHTMLToken::cmpNext(char ch)
     return m_char == ch && m_device->getChar(&m_char);
 }
 
+
+// IMPORTER
+
 BookmarksImporter::BookmarksImporter(const QString &fileName)
 {
     m_root = new BookmarkNode(BookmarkNode::Root);
     m_error = false;
+    m_errorLine = m_errorColumn = 0;
 
     QFile file(fileName);
-    if (!file.exists()) {
-        // error
+    if (!file.exists())
         return;
-    }
     file.open(QFile::ReadOnly);
-    m_device = &file;
+    m_device = new BookmarksDevice(&file);
 
     if (fileName.endsWith(QLatin1String(".html"))) {
         parseHTML();
@@ -278,19 +324,34 @@ BookmarksImporter::BookmarksImporter(const QString &fileName)
         m_root = reader.read(&file);
         if (reader.error() != QXmlStreamReader::NoError) {
             m_error = true;
-            m_errorString = tr("Error when loading bookmarks on line %1, column %2:\n"
-                               "%3").arg(reader.lineNumber()).arg(reader.columnNumber()).arg(reader.errorString());
-            delete m_root;
-            m_root = 0;
-            return;
+            m_errorString = reader.errorString();
+            m_errorLine = reader.lineNumber();
+            m_errorColumn = reader.columnNumber();
         }
     }
+
+    if (m_error) {
+        delete m_root;
+        m_root = 0;
+    }
+    delete m_device;
 }
 
 bool BookmarksImporter::error() const
 {
     return m_error;
 }
+
+int BookmarksImporter::errorLine() const
+{
+    return m_errorLine;
+}
+
+int BookmarksImporter::errorColumn() const
+{
+    return m_errorColumn;
+}
+
 QString BookmarksImporter::errorString() const
 {
     return m_errorString;
@@ -350,6 +411,7 @@ void BookmarksImporter::parseHTMLFolder(BookmarkNode *parent)
         } else if (m_HTMLToken->type() == BookmarkHTMLToken::Folder) {
             BookmarkNode *folder = new BookmarkNode(BookmarkNode::Folder, parent);
             folder->title = m_HTMLToken->content();
+            folder->expanded = m_HTMLToken->attr(QLatin1String("FOLDED")).toUpper() == QLatin1String("NO");
 
             m_HTMLToken->readNext();
             if (m_HTMLToken->type() == BookmarkHTMLToken::Description) {
@@ -370,6 +432,12 @@ void BookmarksImporter::parseHTMLFolder(BookmarkNode *parent)
 
     if (m_HTMLToken->error())
         m_error = true;
+
+    if (m_error) {
+        m_errorString = tr("Invalid syntax in HTML file");
+        m_errorLine = m_device->line();
+        m_errorColumn = m_device->column();
+    }
 }
 
 void BookmarksImporter::parseADR()

@@ -280,57 +280,23 @@ BookmarksModel *BookmarksManager::bookmarksModel()
 void BookmarksManager::importBookmarks()
 {
     QStringList supportedFormats;
-    //supportedFormats << tr("XBEL bookmarks").append(QLatin1String("(*.xbel *.xml)"));
+    supportedFormats << tr("XBEL bookmarks").append(QLatin1String("(*.xbel *.xml)"));
     supportedFormats << tr("HTML Netscape bookmarks").append(QLatin1String("(*.html)"));
     supportedFormats << tr("Opera ADR").append(QLatin1String("(*.adr)"));
 
-    QString fileName = QFileDialog::getOpenFileName(0, tr("Open File"),
-                                                    QString(), supportedFormats.join(QLatin1String(";;")));
+    QString fileName = QFileDialog::getOpenFileName(0, tr("Open File"), QString(),
+                                                    supportedFormats.join(QLatin1String(";;")));
     if (fileName.isEmpty())
         return;
 
     BookmarksImporter importer(fileName);
     if (importer.error()) {
-        //QMessageBox::warning(0, tr("Loading Bookmark"), importer.errorString());
+        QMessageBox::warning(0, QLatin1String("Loading Bookmark"),
+            tr("Error when loading bookmarks on line %1, column %2:\n"
+               "%3").arg(importer.errorLine()).arg(importer.errorColumn()).arg(importer.errorString()));
         return;
     }
     BookmarkNode *importRootNode = importer.rootNode();
-
-
-    /*
-    XbelReader reader;
-    BookmarkNode *importRootNode = 0;
-    if (fileName.endsWith(QLatin1String(".html"))) {
-        QString program = QLatin1String("htmlToXBel");
-        QStringList arguments;
-        arguments << fileName;
-        QProcess process;
-        process.start(program, arguments);
-        process.waitForFinished(-1);
-        if (process.error() != QProcess::UnknownError) {
-            if (process.error() == QProcess::FailedToStart) {
-                QMessageBox::warning(0, tr("htmlToXBel tool required"),
-                    tr("htmlToXBel tool, which is shipped with Arora and is needed to import HTML bookmarks, "
-                       "is not installed or not available in the search paths."));
-            } else {
-                QMessageBox::warning(0, tr("Loading Bookmark"),
-                    tr("Error when loading HTML bookmarks: %1\n").arg(process.errorString()));
-            }
-            return;
-        }
-        importRootNode = reader.read(&process);
-    }
-    else {
-        importRootNode = reader.read(fileName);
-    }
-    if (reader.error() != QXmlStreamReader::NoError) {
-        QMessageBox::warning(0, QLatin1String("Loading Bookmark"),
-            tr("Error when loading bookmarks on line %1, column %2:\n"
-               "%3").arg(reader.lineNumber()).arg(reader.columnNumber()).arg(reader.errorString()));
-        delete importRootNode;
-        return;
-    }
-    */
 
     importRootNode->setType(BookmarkNode::Folder);
     importRootNode->title = (tr("Imported %1").arg(QDate::currentDate().toString(Qt::SystemLocaleShortDate)));

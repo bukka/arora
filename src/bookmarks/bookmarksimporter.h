@@ -26,6 +26,19 @@
 class QIODevice;
 class BookmarkNode;
 
+class BookmarksDevice {
+public:
+    BookmarksDevice(QIODevice *device);
+    int line() const;
+    int column() const;
+    bool getChar(char *ch);
+
+private:
+    QIODevice *m_device;
+    int m_line;
+    int m_column;
+};
+
 class BookmarkHTMLToken
 {
 public:
@@ -43,7 +56,7 @@ public:
         Separator
     };
 
-    BookmarkHTMLToken(QIODevice *device);
+    BookmarkHTMLToken(BookmarksDevice *device);
 
     bool readNext();
     bool last() const;
@@ -60,6 +73,7 @@ private:
         QString name;
         bool end;
         bool comment;
+        bool error;
     };
 
     Tag readTag(bool saveAttributes = true);
@@ -74,8 +88,8 @@ private:
     bool m_error;
     Type m_type;
     QString m_content;
-    QIODevice *m_device;
     QMap<QString, QString> m_attributes;
+    BookmarksDevice *m_device;
 };
 
 class BookmarksImporter : public QObject
@@ -84,6 +98,8 @@ public:
     BookmarksImporter(const QString &fileName);
 
     bool error() const;
+    int errorLine() const;
+    int errorColumn() const;
     QString errorString() const;
     BookmarkNode *rootNode() const;
 
@@ -93,8 +109,10 @@ private:
     void parseADR();
 
     bool m_error;
+    int m_errorLine;
+    int m_errorColumn;
     QString m_errorString;
-    QIODevice *m_device;
+    BookmarksDevice *m_device;
     BookmarkNode *m_root;
     BookmarkHTMLToken *m_HTMLToken;
 };
