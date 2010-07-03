@@ -282,7 +282,7 @@ void BookmarksManager::importBookmarks()
     QStringList supportedFormats;
     supportedFormats << tr("XBEL bookmarks").append(QLatin1String("(*.xbel *.xml)"));
     supportedFormats << tr("HTML Netscape bookmarks").append(QLatin1String("(*.html)"));
-    supportedFormats << tr("Opera ADR").append(QLatin1String("(*.adr)"));
+    //supportedFormats << tr("Opera ADR").append(QLatin1String("(*.adr)"));
 
     QString fileName = QFileDialog::getOpenFileName(0, tr("Open File"), QString(),
                                                     supportedFormats.join(QLatin1String(";;")));

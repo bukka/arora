@@ -19,6 +19,7 @@
 
 #include <qfile.h>
 #include <qchar.h>
+#include <qtextcodec.h>
 
 #include "bookmarksimporter.h"
 #include "bookmarknode.h"
@@ -27,10 +28,18 @@
 
 // DEVICE
 
-BookmarksDevice::BookmarksDevice(QIODevice *device)
+BookmarksDevice::BookmarksDevice(QIODevice *device, FileType type)
 {
     m_device = device;
     m_line = m_column = 1;
+    m_data = device->read(BUFF_SIZE);
+    if (type == HTML)
+        m_codec = QTextCodec::codecForHtml(m_data);
+    else
+        m_codec = QTextCodec::codecForName("UTF-8");
+
+    m_utf = m_codec->name().contains("UTF");
+    makeString();
 }
 
 int BookmarksDevice::line() const
@@ -43,19 +52,40 @@ int BookmarksDevice::column() const
     return m_column;
 }
 
-bool BookmarksDevice::getChar(char *ch)
+bool BookmarksDevice::getChar(QChar &ch)
 {
-    if (m_device->getChar(ch)) {
-        if (*ch == '\n') {
-            m_column = 1;
-            m_line++;
-        } else
-            m_column++;
-        return true;
+    if (m_pos == m_str.size()) {
+        m_data = m_device->read(BUFF_SIZE);
+        if (!makeString())
+            return false;
+    }
+
+    ch = m_str[m_pos++];
+    if (ch.category() == QChar::Separator_Line) {
+        m_column = 1;
+        m_line++;
     } else
-        return false;
+        m_column++;
+
+    return true;
 }
 
+bool BookmarksDevice::makeString()
+{
+    if (m_data.isEmpty())
+        return false;
+
+    if (m_utf) {
+        char ch;
+        // fixed division one utf character between two buffers
+        while (static_cast<int>(m_data[m_data.size() - 1]) < 0 && m_device->getChar(&ch))
+            m_data.append(ch);
+    }
+
+    m_pos = 0;
+    m_str = m_codec->toUnicode(m_data);
+    return true;
+}
 
 // TOKEN
 
@@ -64,7 +94,7 @@ BookmarkHTMLToken::BookmarkHTMLToken(BookmarksDevice *device)
     m_device = device;
     m_error = false;
 
-    if (m_device->getChar(&m_char)) {
+    if (m_device->getChar(m_char)) {
         m_last = false;
         readNext();
     } else {
@@ -184,18 +214,18 @@ BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
         return tag;
     }
 
-    if (m_char == '!') { // comment
+    if (m_char == QLatin1Char('!')) { // comment
         tag.comment = true;
         do { // skip
-            if (!m_device->getChar(&m_char)) {
+            if (!m_device->getChar(m_char)) {
                 m_error = true;
                 return tag;
             }
-        } while (m_char != '>');
+        } while (m_char != QLatin1Char('>'));
     } else {
-        if (m_char == '/') {
+        if (m_char == QLatin1Char('/')) {
             tag.end = true;
-            if (!m_device->getChar(&m_char))
+            if (!m_device->getChar(m_char))
                 m_error = true;
         }
 
@@ -205,7 +235,7 @@ BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
 
         if (tag.end) {
             skipBlanks();
-            if (m_char != '>')
+            if (m_char != QLatin1Char('>'))
                 m_error = true;
         } else {
             if (!readAttributes(saveAttributes))
@@ -214,7 +244,7 @@ BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
     }
 
     if (!m_error)
-        m_last = (!m_device->getChar(&m_char) || !skipBlanks());
+        m_last = (!m_device->getChar(m_char) || !skipBlanks());
     else
         tag.error = true;
 
@@ -224,13 +254,11 @@ BookmarkHTMLToken::Tag BookmarkHTMLToken::readTag(bool saveAttributes)
 QString BookmarkHTMLToken::readIdent()
 {
     QString str;
-    QChar ch;
-    QByteArray otherChars = "-_";
 
     skipBlanks();
-    while ((ch = QChar::fromAscii(m_char)).isLetterOrNumber() || otherChars.contains(m_char)) {
-        str.append(ch);
-        if (!m_device->getChar(&m_char)) {
+    while (m_char.isLetterOrNumber() || m_char == QLatin1Char('-') || m_char == QLatin1Char('_')) {
+        str.append(m_char);
+        if (!m_device->getChar(m_char)) {
             m_error = true;
             return QString();
         }
@@ -238,21 +266,53 @@ QString BookmarkHTMLToken::readIdent()
     return str.toUpper();
 }
 
-QString BookmarkHTMLToken::readContent(char endChar)
+QString BookmarkHTMLToken::readContent(QChar endChar)
 {
     QString str;
     do {
         if (m_char == endChar)
             break;
-        str.append(QChar::fromAscii(m_char));
+        str.append(m_char);
 
-        if (!m_device->getChar(&m_char)) {
+        if (!m_device->getChar(m_char)) {
             m_error = true;
             return QString();
         }
     } while (true);
 
-    return str;
+    // replacing entities
+    QString content;
+    QRegExp rx(QLatin1String("&([^;]{2,8});"));
+    int pos = 0;
+    int left = 0;
+    while ((pos = rx.indexIn(str, pos)) != -1) {
+        QString repl;
+        QString entity = rx.cap(1);
+        if (entity.startsWith(QLatin1Char('#'))) {
+            bool ok;
+            int charCode = entity.mid(1).toInt(&ok, 10);
+            if (ok) {
+                repl = QChar(charCode);
+            } else
+                repl = QString(QLatin1String("&%1;")).arg(entity);
+        } else if (entity == QLatin1String("amp")) {
+            repl = QLatin1Char('&');
+        } else if (entity == QLatin1String("lt")) {
+            repl = QLatin1Char('<');
+        } else if (entity == QLatin1String("gt")) {
+            repl = QLatin1Char('>');
+        } else if (entity == QLatin1String("quot")) {
+            repl = QLatin1Char('"');
+        } else if (entity == QLatin1String("amp")) {
+            repl = QString(QLatin1String("&%1;")).arg(entity);
+        }
+        content.append(str.mid(left, pos - left) + repl);
+        pos += rx.matchedLength();
+        left = pos;
+    }
+    content.append(str.mid(left));
+
+    return content;
 }
 
 bool BookmarkHTMLToken::readAttributes(bool save)
@@ -260,7 +320,7 @@ bool BookmarkHTMLToken::readAttributes(bool save)
     while (true) {
         if (!skipBlanks())
             return false;
-        if (m_char == '>')
+        if (m_char == QLatin1Char('>'))
             return true;
 
         QString name = readIdent();
@@ -268,12 +328,12 @@ bool BookmarkHTMLToken::readAttributes(bool save)
             return false;
 
         QString value;
-        if (m_char == '=') {
-            if (!m_device->getChar(&m_char) || !skipBlanks() || !cmpNext('"'))
+        if (m_char == QLatin1Char('=')) {
+            if (!m_device->getChar(m_char) || !skipBlanks() || !cmpNext('"'))
                 return false;
             
-            value = readContent('"');
-            if (m_error || !m_device->getChar(&m_char))
+            value = readContent(QLatin1Char('"'));
+            if (m_error || !m_device->getChar(m_char))
                 return false;
         }
         else
@@ -286,10 +346,10 @@ bool BookmarkHTMLToken::readAttributes(bool save)
 
 bool BookmarkHTMLToken::skipBlanks()
 {
-    if (!QChar::fromAscii(m_char).isSpace())
+    if (!m_char.isSpace())
         return true;
-    while (m_device->getChar(&m_char)) {
-        if (!QChar::fromAscii(m_char).isSpace())
+    while (m_device->getChar(m_char)) {
+        if (!m_char.isSpace())
             return true;
     }
     return false;
@@ -297,7 +357,7 @@ bool BookmarkHTMLToken::skipBlanks()
 
 bool BookmarkHTMLToken::cmpNext(char ch)
 {
-    return m_char == ch && m_device->getChar(&m_char);
+    return m_char == QLatin1Char(ch) && m_device->getChar(m_char);
 }
 
 

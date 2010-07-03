@@ -28,15 +28,29 @@ class BookmarkNode;
 
 class BookmarksDevice {
 public:
-    BookmarksDevice(QIODevice *device);
+    enum FileType {
+        ADR,
+        HTML
+    };
+
+    BookmarksDevice(QIODevice *device, FileType type = HTML);
     int line() const;
     int column() const;
-    bool getChar(char *ch);
+    bool getChar(QChar &ch);
 
 private:
+    static const int BUFF_SIZE = 512;
+
+    bool makeString();
+
+    QByteArray m_data;
+    QString m_str;
+    QTextCodec *m_codec;
     QIODevice *m_device;
+    bool m_utf;
     int m_line;
     int m_column;
+    int m_pos;
 };
 
 class BookmarkHTMLToken
@@ -78,12 +92,12 @@ private:
 
     Tag readTag(bool saveAttributes = true);
     QString readIdent();
-    QString readContent(char endChar = '<');
+    QString readContent(QChar endChar = QLatin1Char('<'));
     bool readAttributes(bool save = true);
     bool skipBlanks();
     bool cmpNext(char ch);
 
-    char m_char;
+    QChar m_char;
     bool m_last;
     bool m_error;
     Type m_type;
